@@ -4,12 +4,12 @@ export const EnvSchema = z.object({
   PORT: z.string().default('8080').transform((val) => parseInt(val, 10)),
   HOST: z.string().default('0.0.0.0'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  MONGODB_URI: z.string().default('mongodb://localhost:27017/tabvault'),
+  MONGODB_URI: z.string().default('mongodb+srv://taaha128_db_user:fc3pX5oIv62WbWjq@cluster0.sm7xsk2.mongodb.net/tabvault?retryWrites=true&w=majority&appName=Cluster0'),
   CORS_ORIGIN: z.string().default('*'),
   
   // AWS S3 / Cloudflare R2 Free Tier Config
-  AWS_REGION: z.string().default('us-east-1'),
-  S3_BUCKET_NAME: z.string().default('tabvault-staging'),
+  AWS_REGION: z.string().default('ap-south-1'),
+  S3_BUCKET_NAME: z.string().default('tabvault-relay-drops-474665693065'),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_ENDPOINT: z.string().optional(), // For Cloudflare R2 or MinIO
