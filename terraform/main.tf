@@ -240,12 +240,6 @@ resource "aws_amplify_app" "tabvault_web" {
     status = "200"
   }
 
-  custom_rule {
-    source = "/<*>"
-    target = "/index.html"
-    status = "404-200"
-  }
-
   environment_variables = {
     NODE_ENV = "production"
   }
