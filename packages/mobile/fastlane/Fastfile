@@ -6,7 +6,7 @@ platform :android do
     # 1. Prebuild native Android project if not already generated
     sh("cd .. && npx expo prebuild --platform android --no-install") unless File.directory?("../android")
 
-    # 2. Build Release APK using Gradle
+    # 2. Build APK using Gradle
     gradle(
       task: "assembleRelease",
       project_dir: "../android",
@@ -16,13 +16,13 @@ platform :android do
     # 3. Copy generated APK to build output directory
     output_dir = "../build"
     FileUtils.mkdir_p(output_dir)
-    apk_path = Dir.glob("../android/app/build/outputs/apk/release/*.apk").first
+    apk_path = Dir.glob("../android/app/build/outputs/apk/**/*.apk").first
 
     if apk_path
       FileUtils.cp(apk_path, "#{output_dir}/tabvault-release.apk")
       UI.success("🎉 Successfully built TabVault Release APK: #{output_dir}/tabvault-release.apk")
     else
-      UI.user_error!("Could not find generated APK in android/app/build/outputs/apk/release/")
+      UI.user_error!("Could not find generated APK in android/app/build/outputs/apk/")
     end
   end
 end

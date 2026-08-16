@@ -27,7 +27,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: 📦 Install Monorepo Dependencies
         run: npm install
@@ -71,28 +70,25 @@ jobs:
           path: packages/web/dist/
 
       - name: 🔐 Configure AWS Credentials
-        if: env.AWS_ACCESS_KEY_ID != ''
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
 
       - name: 🚀 Deploy to AWS Amplify
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
         run: |
           cd packages/web/dist
-          zip -r ../../../dist.zip .
+          zip -r ../../../dist.zip *
           cd ../../..
-          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
-            DEPLOY_JSON=$(aws amplify create-deployment --app-id d1rmonr4dy05xx --branch-name main --region ap-south-1)
-            JOB_ID=$(echo $DEPLOY_JSON | jq -r '.jobId')
-            ZIP_URL=$(echo $DEPLOY_JSON | jq -r '.zipUploadUrl')
-            curl -H "Content-Type: application/zip" --upload-file dist.zip "$ZIP_URL"
-            aws amplify start-deployment --app-id d1rmonr4dy05xx --branch-name main --job-id $JOB_ID --region ap-south-1
-            echo "🎉 Successfully deployed to AWS Amplify: https://main.d1rmonr4dy05xx.amplifyapp.com"
-          fi
+          DEPLOY_JSON=$(aws amplify create-deployment --app-id d1rmonr4dy05xx --branch-name main --region ap-south-1)
+          JOB_ID=$(echo $DEPLOY_JSON | jq -r '.jobId')
+          ZIP_URL=$(echo $DEPLOY_JSON | jq -r '.zipUploadUrl')
+          curl -H "Content-Type: application/zip" --upload-file dist.zip "$ZIP_URL"
+          aws amplify start-deployment --app-id d1rmonr4dy05xx --branch-name main --job-id $JOB_ID --region ap-south-1
+          echo "🎉 Successfully deployed to AWS Amplify: https://main.d1rmonr4dy05xx.amplifyapp.com"
 
   # -------------------------------------------------------------
   # Job 3: Deploy Serverless Backend to AWS Lambda
@@ -112,27 +108,24 @@ jobs:
           path: packages/server/dist/
 
       - name: 🔐 Configure AWS Credentials
-        if: env.AWS_ACCESS_KEY_ID != ''
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
 
       - name: 🚀 Package & Update AWS Lambda Function
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
         run: |
           cd packages/server/dist
           cp lambda.cjs lambda.js
-          zip lambda.zip lambda.js
-          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
-            aws lambda update-function-code \
-              --function-name tabvault-backend-lambda \
-              --zip-file fileb://lambda.zip \
-              --region ap-south-1
-            echo "✅ Live AWS Lambda function successfully updated!"
-          fi
+          zip -r lambda.zip lambda.js
+          aws lambda update-function-code \
+            --function-name tabvault-backend-lambda \
+            --zip-file fileb://lambda.zip \
+            --region ap-south-1
+          echo "✅ Live AWS Lambda function successfully updated!"
 
   # -------------------------------------------------------------
   # Job 4: Build & Release Android APK (Fastlane)
@@ -161,13 +154,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: 💎 Setup Ruby & Fastlane
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
-          bundler-cache: true
+          bundler-cache: false
           working-directory: packages/mobile
 
       - name: 📦 Install Dependencies & Build Core
@@ -179,6 +171,7 @@ jobs:
         working-directory: packages/mobile
         run: |
           cd fastlane
+          bundle install
           bundle exec fastlane android build_apk
 
       - name: 📤 Upload APK Artifact
