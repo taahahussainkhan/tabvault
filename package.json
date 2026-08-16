@@ -1,0 +1,32 @@
+{
+  "name": "tabvault-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ultra-Fast, Cross-Platform File & Universal Clipboard Hub",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:server": "npm run dev --workspace=@tabvault/server",
+    "dev:web": "npm run dev --workspace=@tabvault/web",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "keywords": [
+    "webrtc",
+    "e2ee",
+    "file-sharing",
+    "universal-clipboard",
+    "p2p",
+    "pwa",
+    "s3-relay"
+  ],
+  "author": "Taaha Hussain Khan",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
