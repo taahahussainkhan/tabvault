@@ -1,3 +1,3 @@
-export * from './Header.js';
-export * from './QRScannerModal.js';
-export * from './ClipboardFeed.js';
+export * from './Header';
+export * from './QRScannerModal';
+export * from './ClipboardFeed';

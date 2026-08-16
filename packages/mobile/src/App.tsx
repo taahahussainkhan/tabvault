@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, StatusBar } from 'react-native';
-import { Header, QRScannerModal, ClipboardFeed, MobileClipboardItem } from './components/index.js';
+import { Header, QRScannerModal, ClipboardFeed, MobileClipboardItem } from './components';
 
 export function App() {
   const [vaultId, setVaultId] = useState<string>('vault_demo');
@@ -38,9 +38,20 @@ export function App() {
         isConnected={true}
         onOpenScan={() => setIsScannerOpen(true)}
       />
-
-      <ClipboardFeed items={clipboardItems} />
-
+      <ClipboardFeed
+        items={clipboardItems}
+        onSendText={(text: string) => {
+          setClipboardItems((prev) => [
+            {
+              id: `clip_${Date.now()}`,
+              text,
+              senderName: 'This Android Device',
+              timestamp: Date.now(),
+            },
+            ...prev,
+          ]);
+        }}
+      />
       <QRScannerModal
         visible={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
@@ -50,11 +61,11 @@ export function App() {
   );
 }
 
+export default App;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#07090e',
   },
 });
-
-export default App;
