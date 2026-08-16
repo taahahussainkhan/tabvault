@@ -211,7 +211,6 @@ jobs:
       - name: 🚀 Run Fastlane to Build APK
         working-directory: packages/mobile
         run: |
-          cd fastlane
           bundle install
           bundle exec fastlane android build_apk
 

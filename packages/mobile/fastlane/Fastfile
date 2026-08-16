@@ -1,22 +1,27 @@
 default_platform(:android)
 
+opt_out_usage
+
 platform :android do
   desc "Build Android Release APK for direct GitHub Release distribution"
   lane :build_apk do
     # 1. Prebuild native Android project if not already generated
-    sh("cd .. && npx expo prebuild --platform android --no-install") unless File.directory?("../android")
+    sh("npx expo prebuild --platform android --no-install") unless File.directory?("android")
 
-    # 2. Build APK using Gradle
+    # 2. Make gradlew executable
+    sh("chmod +x android/gradlew") if File.exist?("android/gradlew")
+
+    # 3. Build APK using Gradle
     gradle(
       task: "assembleRelease",
-      project_dir: "../android",
+      project_dir: "android",
       print_command: true
     )
 
-    # 3. Copy generated APK to build output directory
-    output_dir = "../build"
+    # 4. Copy generated APK to build output directory
+    output_dir = "build"
     FileUtils.mkdir_p(output_dir)
-    apk_path = Dir.glob("../android/app/build/outputs/apk/**/*.apk").first
+    apk_path = Dir.glob("android/app/build/outputs/apk/**/*.apk").first
 
     if apk_path
       FileUtils.cp(apk_path, "#{output_dir}/tabvault-release.apk")
