@@ -1,4 +1,4 @@
-name: TabVault CI/CD & Automated Release Pipeline
+name: TabVault Serverless CI/CD & Android Release Pipeline
 
 on:
   push:
@@ -32,13 +32,13 @@ jobs:
       - name: 📦 Install Monorepo Dependencies
         run: npm install
 
-      - name: 🔨 Build @tabvault/core
+      - name: 🔨 Build Shared Core Library
         run: npm run build --workspace=@tabvault/core
 
-      - name: 🔨 Build @tabvault/server
-        run: npm run build --workspace=@tabvault/server
+      - name: 🔨 Build Server Lambda Bundle
+        run: npm run build:lambda --workspace=@tabvault/server
 
-      - name: 🔨 Build @tabvault/web
+      - name: 🔨 Build Web Frontend
         run: npm run build --workspace=@tabvault/web
 
       - name: 📤 Archive Web Dist
@@ -46,6 +46,12 @@ jobs:
         with:
           name: web-dist
           path: packages/web/dist/
+
+      - name: 📤 Archive Lambda Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-dist
+          path: packages/server/dist/lambda.cjs
 
   # -------------------------------------------------------------
   # Job 2: Deploy Frontend to AWS Amplify (Mumbai ap-south-1)
@@ -74,7 +80,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
 
-      - name: 🚀 Zip and Deploy to AWS Amplify App
+      - name: 🚀 Deploy to AWS Amplify
         run: |
           cd packages/web/dist
           zip -r ../../../dist.zip .
@@ -86,47 +92,47 @@ jobs:
             curl -H "Content-Type: application/zip" --upload-file dist.zip "$ZIP_URL"
             aws amplify start-deployment --app-id d1rmonr4dy05xx --branch-name main --job-id $JOB_ID --region ap-south-1
             echo "🎉 Successfully deployed to AWS Amplify: https://main.d1rmonr4dy05xx.amplifyapp.com"
-          else
-            echo "ℹ️ AWS_ACCESS_KEY_ID secret not present. Skipping direct CLI deploy."
           fi
 
   # -------------------------------------------------------------
-  # Job 3: Deploy Backend Container to AWS EC2 Instance
+  # Job 3: Deploy Serverless Backend to AWS Lambda
   # -------------------------------------------------------------
-  deploy-backend-ec2:
-    name: ⚡ Deploy Backend to AWS EC2
+  deploy-backend-lambda:
+    name: ⚡ Deploy Serverless AWS Lambda
     needs: build-and-verify
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 🚀 Deploy Backend to EC2 via SSH
-        if: env.EC2_SSH_KEY != ''
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+      - name: 📥 Download Lambda Artifact
+        uses: actions/download-artifact@v4
         with:
-          host: ${{ secrets.EC2_HOST || '13.203.219.102' }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /opt/tabvault
-            sudo git fetch origin
-            sudo git reset --hard origin/main
-            sudo git clean -fd
-            sudo docker build -t tabvault-server -f packages/server/Dockerfile .
-            sudo docker stop tabvault-backend || true
-            sudo docker rm tabvault-backend || true
-            sudo docker run -d --name tabvault-backend --restart always -p 8080:8080 \
-              -e PORT=8080 \
-              -e HOST=0.0.0.0 \
-              -e AWS_REGION=ap-south-1 \
-              -e S3_BUCKET_NAME=tabvault-relay-drops-474665693065 \
-              -e MONGODB_URI="${{ secrets.MONGODB_URI || 'mongodb+srv://taaha128_db_user:fc3pX5oIv62WbWjq@cluster0.sm7xsk2.mongodb.net/tabvault?retryWrites=true&w=majority&appName=Cluster0' }}" \
-              tabvault-server
-            sudo docker ps
-            echo "✅ Live Backend successfully deployed on EC2!"
+          name: lambda-dist
+          path: packages/server/dist/
+
+      - name: 🔐 Configure AWS Credentials
+        if: env.AWS_ACCESS_KEY_ID != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+
+      - name: 🚀 Package & Update AWS Lambda Function
+        run: |
+          cd packages/server/dist
+          cp lambda.cjs lambda.js
+          zip lambda.zip lambda.js
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            aws lambda update-function-code \
+              --function-name tabvault-backend-lambda \
+              --zip-file fileb://lambda.zip \
+              --region ap-south-1
+            echo "✅ Live AWS Lambda function successfully updated!"
+          fi
 
   # -------------------------------------------------------------
   # Job 4: Build & Release Android APK (Fastlane)

@@ -97,8 +97,8 @@ export function useFileTransfer(
             prev.map((t) => (t.transferId === transferId ? { ...t, route: 's3_relay_fallback' } : t))
           );
 
-          const isProductionAmplify = window.location.hostname.includes('amplifyapp.com');
-          const apiBase = isProductionAmplify ? 'http://13.203.219.102:8080' : '';
+          const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          const apiBase = isLocalhost ? '' : 'https://2ch184cyr3.execute-api.ap-south-1.amazonaws.com';
           const presignRes = await fetch(`${apiBase}/api/relay/presign`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

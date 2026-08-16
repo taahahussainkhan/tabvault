@@ -55,7 +55,179 @@ resource "aws_s3_bucket_cors_configuration" "relay_cors" {
 }
 
 # ==============================================================================
-# 2. AWS Amplify Web App Hosting (Global CDN + Auto CI/CD + Free SSL)
+# 2. IAM Role & Permissions for Serverless Lambda
+# ==============================================================================
+resource "aws_iam_role" "lambda_exec" {
+  name = "tabvault-serverless-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "lambda_policy" {
+  name = "tabvault-lambda-permissions"
+  role = aws_iam_role.lambda_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "${aws_s3_bucket.relay_drops.arn}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:ManageConnections"
+        ]
+        Resource = "arn:aws:execute-api:*:*:*"
+      }
+    ]
+  })
+}
+
+# ==============================================================================
+# 3. AWS Lambda Function (Node.js 20 ESM)
+# ==============================================================================
+resource "aws_lambda_function" "tabvault_backend" {
+  function_name    = "tabvault-backend-lambda"
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "lambda.handler"
+  runtime          = "nodejs20.x"
+  filename         = "${path.module}/../packages/server/dist/lambda.zip"
+  source_code_hash = filebase64sha256("${path.module}/../packages/server/dist/lambda.zip")
+  timeout          = 30
+  memory_size      = 256
+
+  environment {
+    variables = {
+      NODE_ENV       = "production"
+      S3_BUCKET_NAME = var.s3_bucket_name
+      MONGODB_URI    = var.mongodb_uri
+    }
+  }
+
+  tags = {
+    Name = "tabvault-backend-lambda"
+    App  = "TabVault"
+  }
+}
+
+# ==============================================================================
+# 4. API Gateway WebSocket API (Signaling & Presence Hub)
+# ==============================================================================
+resource "aws_apigatewayv2_api" "ws_api" {
+  name                       = "tabvault-websocket-api"
+  protocol_type              = "WEBSOCKET"
+  route_selection_expression = "$request.body.action"
+}
+
+resource "aws_apigatewayv2_integration" "ws_integration" {
+  api_id           = aws_apigatewayv2_api.ws_api.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = aws_lambda_function.tabvault_backend.invoke_arn
+}
+
+resource "aws_apigatewayv2_route" "ws_connect" {
+  api_id    = aws_apigatewayv2_api.ws_api.id
+  route_key = "$connect"
+  target    = "integrations/${aws_apigatewayv2_integration.ws_integration.id}"
+}
+
+resource "aws_apigatewayv2_route" "ws_disconnect" {
+  api_id    = aws_apigatewayv2_api.ws_api.id
+  route_key = "$disconnect"
+  target    = "integrations/${aws_apigatewayv2_integration.ws_integration.id}"
+}
+
+resource "aws_apigatewayv2_route" "ws_default" {
+  api_id    = aws_apigatewayv2_api.ws_api.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.ws_integration.id}"
+}
+
+resource "aws_apigatewayv2_stage" "ws_stage" {
+  api_id      = aws_apigatewayv2_api.ws_api.id
+  name        = "prod"
+  auto_deploy = true
+}
+
+resource "aws_lambda_permission" "ws_permission" {
+  statement_id  = "AllowAPIGatewayWSInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.tabvault_backend.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.ws_api.execution_arn}/*/*"
+}
+
+# ==============================================================================
+# 5. API Gateway HTTP/REST API (Presigned S3 URLs & Healthcheck)
+# ==============================================================================
+resource "aws_apigatewayv2_api" "http_api" {
+  name          = "tabvault-http-api"
+  protocol_type = "HTTP"
+
+  cors_configuration {
+    allow_origins = ["*"]
+    allow_methods = ["GET", "POST", "OPTIONS"]
+    allow_headers = ["Content-Type", "Authorization"]
+    max_age       = 3000
+  }
+}
+
+resource "aws_apigatewayv2_integration" "http_integration" {
+  api_id           = aws_apigatewayv2_api.http_api.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = aws_lambda_function.tabvault_backend.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "http_default" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.http_integration.id}"
+}
+
+resource "aws_apigatewayv2_stage" "http_stage" {
+  api_id      = aws_apigatewayv2_api.http_api.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_lambda_permission" "http_permission" {
+  statement_id  = "AllowAPIGatewayHTTPInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.tabvault_backend.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+# ==============================================================================
+# 6. AWS Amplify Web App Hosting (Global CDN + Auto CI/CD)
 # ==============================================================================
 resource "aws_amplify_app" "tabvault_web" {
   name        = "tabvault-web"
@@ -85,116 +257,4 @@ resource "aws_amplify_branch" "main" {
 
   enable_auto_build = true
   stage             = "PRODUCTION"
-}
-
-# ==============================================================================
-# 3. AWS EC2 WebSocket Signaling & Relay Hub
-# ==============================================================================
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
-
-resource "aws_key_pair" "tabvault" {
-  key_name   = "tabvault-key-mumbai"
-  public_key = var.public_key
-}
-
-resource "aws_security_group" "tabvault_sg" {
-  name        = "tabvault-backend-sg"
-  description = "Allow inbound traffic for SSH, HTTP, HTTPS, and TabVault WebSocket relay"
-
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "HTTPS"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "TabVault Fastify WebSocket Relay"
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    description = "Allow all outbound traffic"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "tabvault-backend-sg"
-  }
-}
-
-resource "aws_instance" "tabvault_backend" {
-  ami                         = data.aws_ami.ubuntu.id
-  instance_type               = var.instance_type
-  key_name                    = aws_key_pair.tabvault.key_name
-  vpc_security_group_ids      = [aws_security_group.tabvault_sg.id]
-  associate_public_ip_address = true
-
-  root_block_device {
-    volume_size           = 20
-    volume_type           = "gp3"
-    delete_on_termination = true
-  }
-
-  user_data = <<-EOF
-              #!/bin/bash
-              set -e
-              apt-get update
-              apt-get install -y docker.io git
-              systemctl enable docker
-              systemctl start docker
-              
-              mkdir -p /opt/tabvault
-              cd /opt/tabvault
-              git clone https://github.com/taahahussainkhan/tabvault.git .
-              docker build -t tabvault-server -f packages/server/Dockerfile .
-              docker run -d --name tabvault-backend --restart always -p 8080:8080 \
-                -e PORT=8080 \
-                -e HOST=0.0.0.0 \
-                -e AWS_REGION=${var.aws_region} \
-                -e S3_BUCKET_NAME=${var.s3_bucket_name} \
-                -e MONGODB_URI="${var.mongodb_uri}" \
-                tabvault-server
-              EOF
-
-  tags = {
-    Name = "tabvault-signaling-backend"
-    App  = "TabVault"
-  }
 }

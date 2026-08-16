@@ -3,6 +3,8 @@ import { DeviceInfo, SignalingMessage } from '@tabvault/core';
 import { LocalIdentity, WebCryptoService } from '../services/crypto.service.js';
 import { SignalingClient } from '../services/signaling.client.js';
 
+const LIVE_WS_ENDPOINT = 'wss://id1j2eilb0.execute-api.ap-south-1.amazonaws.com/prod';
+
 export function useSignaling(identity: LocalIdentity | null, wsUrl?: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [activeDevices, setActiveDevices] = useState<DeviceInfo[]>([]);
@@ -11,15 +13,13 @@ export function useSignaling(identity: LocalIdentity | null, wsUrl?: string) {
   useEffect(() => {
     if (!identity) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
-    const port = window.location.port === '5173' ? '8080' : window.location.port;
-    
-    // Auto-connect to live EC2 backend when on Amplify or fallback to local
-    const isProductionAmplify = host.includes('amplifyapp.com');
-    const defaultWsUrl = isProductionAmplify
-      ? 'ws://13.203.219.102:8080/ws'
-      : `${protocol}//${host}${port ? `:${port}` : ''}/ws`;
+    // Connect to live AWS API Gateway WebSocket when deployed on Amplify or remote
+    const isLocalhost = host === 'localhost' || host === '127.0.0.1';
+    const defaultWsUrl = isLocalhost
+      ? `ws://${host}:${window.location.port === '5173' ? '8080' : window.location.port}/ws`
+      : LIVE_WS_ENDPOINT;
+
     const targetUrl = wsUrl || defaultWsUrl;
 
     const localDeviceInfo: DeviceInfo = {
@@ -39,7 +39,6 @@ export function useSignaling(identity: LocalIdentity | null, wsUrl?: string) {
     });
 
     const unsubscribePresence = client.onPresence((devices) => {
-      // Filter out local device from active peers list
       const peers = devices.filter((d) => d.deviceId !== identity.deviceId);
       setActiveDevices(peers);
     });
