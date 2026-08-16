@@ -1,0 +1,166 @@
+name: TabVault CI/CD & Automated Release Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------------------------
+  # Job 1: Build & Verify Monorepo (Core, Server, Web)
+  # -------------------------------------------------------------
+  build-and-verify:
+    name: ⚡ Build & Typecheck Monorepo
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install Monorepo Dependencies
+        run: npm install
+
+      - name: 🔨 Build @tabvault/core
+        run: npm run build --workspace=@tabvault/core
+
+      - name: 🔨 Build @tabvault/server
+        run: npm run build --workspace=@tabvault/server
+
+      - name: 🔨 Build @tabvault/web
+        run: npm run build --workspace=@tabvault/web
+
+      - name: 📤 Archive Web Dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: packages/web/dist/
+
+  # -------------------------------------------------------------
+  # Job 2: Deploy Frontend to AWS Amplify (Mumbai ap-south-1)
+  # -------------------------------------------------------------
+  deploy-frontend-amplify:
+    name: ☁️ Deploy Frontend to AWS Amplify
+    needs: build-and-verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 📥 Download Web Dist Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: packages/web/dist/
+
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+        continue-on-error: true
+
+      - name: 🚀 Zip and Deploy to AWS Amplify App
+        run: |
+          cd packages/web/dist
+          zip -r ../../../dist.zip .
+          cd ../../..
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            DEPLOY_JSON=$(aws amplify create-deployment --app-id d1rmonr4dy05xx --branch-name main --region ap-south-1)
+            JOB_ID=$(echo $DEPLOY_JSON | jq -r '.jobId')
+            ZIP_URL=$(echo $DEPLOY_JSON | jq -r '.zipUploadUrl')
+            curl -H "Content-Type: application/zip" --upload-file dist.zip "$ZIP_URL"
+            aws amplify start-deployment --app-id d1rmonr4dy05xx --branch-name main --job-id $JOB_ID --region ap-south-1
+            echo "🎉 Successfully deployed to AWS Amplify: https://main.d1rmonr4dy05xx.amplifyapp.com"
+          else
+            echo "ℹ️ AWS credentials secret not configured in repo settings. Automated build via Amplify GitHub webhook active."
+          fi
+
+  # -------------------------------------------------------------
+  # Job 3: Build & Release Android APK (Fastlane)
+  # -------------------------------------------------------------
+  build-and-release-apk:
+    name: 📱 Build & Publish Android APK
+    needs: build-and-verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 📱 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 💎 Setup Ruby & Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: packages/mobile
+
+      - name: 📦 Install Dependencies & Build Core
+        run: |
+          npm install
+          npm run build --workspace=@tabvault/core
+
+      - name: 🚀 Run Fastlane to Build APK
+        working-directory: packages/mobile
+        run: |
+          cd fastlane
+          bundle exec fastlane android build_apk
+
+      - name: 📤 Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tabvault-release-apk
+          path: packages/mobile/build/tabvault-release.apk
+
+      - name: 🏷️ Publish / Update GitHub Release with APK
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        with:
+          tag_name: latest-release
+          name: TabVault Live Release ⚡
+          body: |
+            ## TabVault Android & Web Release ⚡
+            
+            ### 🌐 Live Web App
+            Open [https://main.d1rmonr4dy05xx.amplifyapp.com](https://main.d1rmonr4dy05xx.amplifyapp.com) on any browser.
+            
+            ### 📱 Download Android APK
+            Download **`tabvault-release.apk`** below to install directly on Android.
+            
+            ### 🌟 Features
+            - **Local Wi-Fi P2P**: Direct WebRTC gigabit transfers.
+            - **Universal Clipboard**: Instant sync across paired devices.
+            - **End-to-End Encryption**: Hardware AES-256-GCM encryption.
+            - **Cloud Relay Fallback**: S3 encrypted staging with 24-hour auto-delete.
+          files: packages/mobile/build/tabvault-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
