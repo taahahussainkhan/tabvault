@@ -1,4 +1,4 @@
-name: TabVault CI/CD & Android Release Pipeline
+name: TabVault CI/CD & Automated Release Pipeline
 
 on:
   push:
@@ -14,10 +14,49 @@ concurrency:
 
 jobs:
   # -------------------------------------------------------------
+  # Job 0: Path Filtering (Skip Unchanged Packages)
+  # -------------------------------------------------------------
+  detect-changes:
+    name: 🔍 Detect Changed Packages
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+      server: ${{ steps.filter.outputs.server }}
+      mobile: ${{ steps.filter.outputs.mobile }}
+      workflow: ${{ steps.filter.outputs.workflow }}
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔍 Check Changed Paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            web:
+              - 'packages/web/**'
+              - 'packages/core/**'
+              - 'package.json'
+              - 'amplify.yml'
+              - 'amplify-custom-rules.json'
+            server:
+              - 'packages/server/**'
+              - 'packages/core/**'
+              - 'package.json'
+              - 'terraform/**'
+            mobile:
+              - 'packages/mobile/**'
+              - 'packages/core/**'
+              - 'package.json'
+            workflow:
+              - '.github/workflows/**'
+
+  # -------------------------------------------------------------
   # Job 1: Build & Typecheck Monorepo
   # -------------------------------------------------------------
   build-and-verify:
     name: ⚡ Build & Typecheck Monorepo
+    needs: detect-changes
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout Repository
@@ -35,29 +74,34 @@ jobs:
         run: npm run build --workspace=@tabvault/core
 
       - name: 🔨 Build Server Lambda Bundle
+        if: needs.detect-changes.outputs.server == 'true' || needs.detect-changes.outputs.workflow == 'true' || github.event_name == 'workflow_dispatch'
         run: npm run build:lambda --workspace=@tabvault/server
 
       - name: 🔨 Build Web Frontend
+        if: needs.detect-changes.outputs.web == 'true' || needs.detect-changes.outputs.workflow == 'true' || github.event_name == 'workflow_dispatch'
         run: npm run build --workspace=@tabvault/web
 
       - name: 📤 Archive Web Dist
+        if: needs.detect-changes.outputs.web == 'true' || needs.detect-changes.outputs.workflow == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: web-dist
           path: packages/web/dist/
 
       - name: 📤 Archive Lambda Bundle
+        if: needs.detect-changes.outputs.server == 'true' || needs.detect-changes.outputs.workflow == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: lambda-dist
           path: packages/server/dist/lambda.cjs
 
   # -------------------------------------------------------------
-  # Job 2: Deploy Frontend to AWS Amplify (Mumbai ap-south-1)
+  # Job 2: Deploy Frontend to AWS Amplify
   # -------------------------------------------------------------
   deploy-frontend-amplify:
     name: 🌐 Deploy Frontend to AWS Amplify
-    needs: build-and-verify
+    needs: [detect-changes, build-and-verify]
+    if: needs.detect-changes.outputs.web == 'true' || needs.detect-changes.outputs.workflow == 'true' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout Repository
@@ -93,7 +137,8 @@ jobs:
   # -------------------------------------------------------------
   deploy-backend-lambda:
     name: ⚡ Deploy Serverless AWS Lambda
-    needs: build-and-verify
+    needs: [detect-changes, build-and-verify]
+    if: needs.detect-changes.outputs.server == 'true' || needs.detect-changes.outputs.workflow == 'true' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout Repository
@@ -128,7 +173,8 @@ jobs:
   # -------------------------------------------------------------
   build-and-release-apk:
     name: 📱 Build & Publish Android APK
-    needs: build-and-verify
+    needs: [detect-changes, build-and-verify]
+    if: needs.detect-changes.outputs.mobile == 'true' || needs.detect-changes.outputs.workflow == 'true' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -154,7 +200,7 @@ jobs:
       - name: 💎 Setup Ruby & Fastlane
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.2'
+          ruby-version: '3.3'
           working-directory: packages/mobile
 
       - name: 📦 Install Dependencies & Build Core
