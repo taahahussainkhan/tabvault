@@ -2,12 +2,12 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy all package manifests for monorepo resolution
-COPY package*.json ./
-COPY packages/core/package*.json ./packages/core/
-COPY packages/server/package*.json ./packages/server/
-COPY packages/web/package*.json ./packages/web/
-COPY packages/mobile/package*.json ./packages/mobile/
+# Copy all package.json files (excluding lockfile to avoid stale workspace protocol references)
+COPY package.json pnpm-workspace.yaml* ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/server/package.json ./packages/server/
+COPY packages/web/package.json ./packages/web/
+COPY packages/mobile/package.json ./packages/mobile/
 
 RUN npm install
 
