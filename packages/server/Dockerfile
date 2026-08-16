@@ -1,12 +1,17 @@
 FROM node:20-alpine AS builder
 
 WORKDIR /app
+
+# Copy all package manifests for monorepo resolution
 COPY package*.json ./
 COPY packages/core/package*.json ./packages/core/
 COPY packages/server/package*.json ./packages/server/
+COPY packages/web/package*.json ./packages/web/
+COPY packages/mobile/package*.json ./packages/mobile/
 
 RUN npm install
 
+# Copy source code and build
 COPY tsconfig.base.json ./
 COPY packages/core ./packages/core
 COPY packages/server ./packages/server
@@ -14,6 +19,7 @@ COPY packages/server ./packages/server
 RUN npm run build --workspace=@tabvault/core
 RUN npm run build --workspace=@tabvault/server
 
+# Runner stage
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
