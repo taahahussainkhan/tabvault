@@ -13,9 +13,13 @@ export function useSignaling(identity: LocalIdentity | null, wsUrl?: string) {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
-    // Default to port 8080 during local Vite development
     const port = window.location.port === '5173' ? '8080' : window.location.port;
-    const defaultWsUrl = `${protocol}//${host}${port ? `:${port}` : ''}/ws`;
+    
+    // Auto-connect to live EC2 backend when on Amplify or fallback to local
+    const isProductionAmplify = host.includes('amplifyapp.com');
+    const defaultWsUrl = isProductionAmplify
+      ? 'ws://13.203.219.102:8080/ws'
+      : `${protocol}//${host}${port ? `:${port}` : ''}/ws`;
     const targetUrl = wsUrl || defaultWsUrl;
 
     const localDeviceInfo: DeviceInfo = {

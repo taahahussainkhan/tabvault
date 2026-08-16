@@ -47,15 +47,15 @@ export async function encryptText(text: string, key: CryptoKey): Promise<Encrypt
   const ciphertextBuffer = await subtle.encrypt(
     {
       name: 'AES-GCM',
-      iv,
+      iv: iv as unknown as BufferSource,
     },
     key,
-    plaintextBuffer
+    plaintextBuffer as unknown as BufferSource
   );
 
   return {
     ciphertext: arrayBufferToBase64(ciphertextBuffer),
-    iv: arrayBufferToBase64(iv.buffer),
+    iv: arrayBufferToBase64(new Uint8Array(iv).buffer as ArrayBuffer),
   };
 }
 
@@ -70,10 +70,10 @@ export async function decryptText(payload: EncryptedPayload, key: CryptoKey): Pr
   const decryptedBuffer = await subtle.decrypt(
     {
       name: 'AES-GCM',
-      iv: new Uint8Array(ivBuffer),
+      iv: new Uint8Array(ivBuffer) as unknown as BufferSource,
     },
     key,
-    ciphertextBuffer
+    ciphertextBuffer as unknown as BufferSource
   );
 
   const decoder = new TextDecoder();
@@ -95,10 +95,10 @@ export async function encryptChunk(
   const encryptedChunk = await subtle.encrypt(
     {
       name: 'AES-GCM',
-      iv: chunkIv,
+      iv: chunkIv as unknown as BufferSource,
     },
     key,
-    chunkBuffer
+    chunkBuffer as unknown as BufferSource
   );
 
   return {
@@ -124,9 +124,9 @@ export async function decryptChunk(
   return await subtle.decrypt(
     {
       name: 'AES-GCM',
-      iv: chunkIv,
+      iv: chunkIv as unknown as BufferSource,
     },
     key,
-    encryptedChunk
+    encryptedChunk as unknown as BufferSource
   );
 }

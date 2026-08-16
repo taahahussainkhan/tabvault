@@ -12,12 +12,9 @@ const PresignRequestSchema = z.object({
   fileSize: z.number().nonnegative(),
 });
 
-// In-memory mock storage for local testing when AWS credentials are not set
-const localMockStorage = new Map<string, Buffer>();
-
 export class RelayController {
   /**
-   * Generates a presigned S3/R2 PUT URL for remote file drops.
+   * Generates real presigned S3/R2 PUT URL for remote encrypted file drops.
    */
   public static async getPresignedUpload(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const parseResult = PresignRequestSchema.safeParse(req.body);
@@ -58,34 +55,23 @@ export class RelayController {
   }
 
   /**
-   * Local development mock upload endpoint.
+   * Generates a presigned download URL for a recipient device.
    */
-  public static async mockUpload(
-    req: FastifyRequest<{ Querystring: { key: string } }>,
+  public static async getPresignedDownload(
+    req: FastifyRequest<{ Querystring: { s3Key: string } }>,
     reply: FastifyReply
   ): Promise<void> {
-    const { key } = req.query;
-    if (!key) return reply.status(400).send({ error: 'Missing key parameter' });
-
-    const buffer = await req.body;
-    localMockStorage.set(key, buffer as Buffer);
-    return reply.send({ success: true, message: 'Uploaded to mock storage' });
-  }
-
-  /**
-   * Local development mock download endpoint.
-   */
-  public static async mockDownload(
-    req: FastifyRequest<{ Querystring: { key: string } }>,
-    reply: FastifyReply
-  ): Promise<void> {
-    const { key } = req.query;
-    if (!key || !localMockStorage.has(key)) {
-      return reply.status(404).send({ error: 'File not found in mock storage' });
+    const { s3Key } = req.query;
+    if (!s3Key) {
+      return reply.status(400).send({ error: 'Missing s3Key parameter' });
     }
 
-    const buffer = localMockStorage.get(key)!;
-    reply.header('Content-Type', 'application/octet-stream');
-    return reply.send(buffer);
+    try {
+      const downloadUrl = await S3RelayService.getPresignedDownloadUrl(s3Key);
+      return reply.send({ success: true, downloadUrl });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.status(500).send({ error: 'Could not generate download URL', details: message });
+    }
   }
 }

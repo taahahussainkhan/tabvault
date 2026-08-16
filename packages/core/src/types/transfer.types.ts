@@ -2,41 +2,9 @@
  * File transfer and streaming definitions.
  */
 
-export type TransferRoute = 'webrtc_lan' | 's3_relay_fallback';
+import { EncryptedFileHeader, TransferRoute, TransferState } from '../protocol/schemas/transfer.schema.js';
 
-export type TransferState =
-  | 'queued'
-  | 'negotiating_route'
-  | 'encrypting'
-  | 'transferring'
-  | 'decrypting'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
-
-export interface FileMetadata {
-  transferId: string;
-  vaultId: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
-  totalChunks: number;
-  chunkSize: number;
-  fileChecksum: string; // SHA-256
-  createdAt: number;
-}
-
-export interface EncryptedFileHeader {
-  transferId: string;
-  encryptedMetadata: string; // Base64 (fileName, mimeType encrypted)
-  metadataIv: string;
-  fileSize: number;
-  totalChunks: number;
-  chunkSize: number;
-  fileChecksum: string;
-  senderDeviceId: string;
-  targetDeviceId: string;
-}
+export * from '../protocol/schemas/transfer.schema.js';
 
 export interface TransferProgress {
   transferId: string;

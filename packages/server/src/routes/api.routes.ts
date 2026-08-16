@@ -13,13 +13,13 @@ export async function registerApiRoutes(fastify: FastifyInstance): Promise<void>
   fastify.post('/api/pair/sync-code', PairingController.createSyncCode);
   fastify.get('/api/pair/sync-code/:code', PairingController.resolveSyncCode);
 
-  // S3 Presigned Relay & Mock Storage for Local Development
+  // AWS S3 / Cloudflare R2 Presigned Relay Endpoints
   fastify.post('/api/relay/presign', RelayController.getPresignedUpload);
-  fastify.put('/api/relay/mock-storage/upload', RelayController.mockUpload);
-  fastify.get('/api/relay/mock-storage/download', RelayController.mockDownload);
+  fastify.get('/api/relay/download', RelayController.getPresignedDownload);
 
   // Real-time WebSocket Signaling Hub
-  fastify.get('/ws', { websocket: true }, (connection, req) => {
-    WebSocketHandler.handleConnection(connection.socket, req);
+  fastify.get('/ws', { websocket: true }, (connection: any, req) => {
+    const wsSocket = connection.socket || connection;
+    WebSocketHandler.handleConnection(wsSocket, req);
   });
 }

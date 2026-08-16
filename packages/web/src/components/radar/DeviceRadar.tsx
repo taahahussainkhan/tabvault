@@ -100,7 +100,9 @@ export const DeviceRadar: React.FC<DeviceRadarProps> = ({
           }}
         >
           <Icon name="laptop" size={24} />
-          <span style={{ fontSize: '9px', fontWeight: 700, marginTop: '2px' }}>YOU</span>
+          <span style={{ fontSize: '9px', fontWeight: 700, marginTop: '2px', maxWidth: '52px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {identity?.deviceName ? 'YOU' : 'YOU'}
+          </span>
         </div>
 
         {/* Orbiting Discovered Peers */}

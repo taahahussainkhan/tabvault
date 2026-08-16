@@ -9,8 +9,8 @@ import { getSubtleCrypto } from './key-exchange.js';
  */
 export async function computeSha256(data: ArrayBuffer | Uint8Array): Promise<string> {
   const subtle = getSubtleCrypto();
-  const buffer = data instanceof Uint8Array ? data.buffer : data;
-  const hashBuffer = await subtle.digest('SHA-256', buffer);
+  const bufferSource = (data instanceof Uint8Array ? data : new Uint8Array(data)) as unknown as BufferSource;
+  const hashBuffer = await subtle.digest('SHA-256', bufferSource);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }

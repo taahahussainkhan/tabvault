@@ -4,6 +4,7 @@ import {
   useVaultIdentity,
   useSignaling,
   useUniversalClipboard,
+  useWebRTC,
   useFileTransfer,
 } from './hooks/index.js';
 import { Header, NavigationTabs, TabKey } from './components/layout/index.js';
@@ -11,6 +12,7 @@ import { DeviceRadar } from './components/radar/index.js';
 import { FloatingDropzone, TransferProgress, TransferHistory } from './components/dropzone/index.js';
 import { ClipboardHub } from './components/clipboard/index.js';
 import { PairingModal } from './components/pairing/index.js';
+import { WebStorageService } from './services/storage.service.js';
 
 export const App: React.FC = () => {
   const { identity, loading, changeVault } = useVaultIdentity();
@@ -19,7 +21,27 @@ export const App: React.FC = () => {
     identity,
     signalingClient
   );
-  const { activeTransfers, transferHistory, startTransfer } = useFileTransfer(identity);
+
+  const { getOrCreateDataChannel } = useWebRTC(identity, signalingClient, (_deviceId, channel) => {
+    // Handle incoming DataChannel chunk reception on receiver side
+    const incomingChunks: ArrayBuffer[] = [];
+    channel.onmessage = (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        incomingChunks.push(event.data);
+      } else if (typeof event.data === 'string' && event.data.startsWith('END_FILE:')) {
+        const fileName = event.data.replace('END_FILE:', '') || 'downloaded-file';
+        const totalBytes = incomingChunks.reduce((acc, c) => acc + c.byteLength, 0);
+        const combined = WebStorageService.combineChunks(incomingChunks, totalBytes);
+        WebStorageService.saveBufferAsFile(combined, fileName);
+        incomingChunks.length = 0;
+      }
+    };
+  });
+
+  const { activeTransfers, transferHistory, startTransfer } = useFileTransfer(
+    identity,
+    getOrCreateDataChannel
+  );
 
   const [activeTab, setActiveTab] = useState<TabKey>('radar');
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);

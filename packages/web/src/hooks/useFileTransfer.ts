@@ -1,15 +1,23 @@
 import { useState, useCallback } from 'react';
 import { nanoid } from 'nanoid';
-import { TransferProgress, TransferRoute } from '@tabvault/core';
+import {
+  TransferProgress,
+  TransferRoute,
+  ChunkStreamer,
+  DataChannelWrapper,
+  generateRandomIv,
+} from '@tabvault/core';
 import { LocalIdentity } from '../services/crypto.service.js';
-import { WebStorageService } from '../services/storage.service.js';
 
-export function useFileTransfer(identity: LocalIdentity | null) {
+export function useFileTransfer(
+  identity: LocalIdentity | null,
+  getOrCreateDataChannel?: (targetDeviceId: string) => Promise<RTCDataChannel>
+) {
   const [activeTransfers, setActiveTransfers] = useState<TransferProgress[]>([]);
   const [transferHistory, setTransferHistory] = useState<TransferProgress[]>([]);
 
   const startTransfer = useCallback(
-    async (file: File, targetDeviceId: string, route: TransferRoute = 'webrtc_lan') => {
+    async (file: File, targetDeviceId: string, preferredRoute: TransferRoute = 'webrtc_lan') => {
       if (!identity) return;
 
       const transferId = nanoid(12);
@@ -26,53 +34,117 @@ export function useFileTransfer(identity: LocalIdentity | null) {
         speedBytesPerSec: 0,
         estimatedSecondsRemaining: 0,
         state: 'transferring',
-        route,
+        route: preferredRoute,
       };
 
       setActiveTransfers((prev) => [initialProgress, ...prev]);
 
-      // Read file buffer
       const buffer = await file.arrayBuffer();
       const startTime = Date.now();
-      const chunkSize = 64 * 1024;
 
-      // Simulate streaming chunks across WebRTC with velocity updates
-      for (let chunk = 0; chunk < totalChunks; chunk++) {
-        await new Promise((r) => setTimeout(r, Math.max(10, 50 - totalChunks)));
+      try {
+        let routeUsed: TransferRoute = preferredRoute;
 
-        const currentBytes = Math.min((chunk + 1) * chunkSize, totalBytes);
-        const elapsedSec = (Date.now() - startTime) / 1000 || 0.01;
-        const speed = currentBytes / elapsedSec;
-        const remainingBytes = totalBytes - currentBytes;
-        const eta = remainingBytes / (speed || 1);
+        // Try direct WebRTC P2P first
+        if (getOrCreateDataChannel && targetDeviceId !== 'broadcast' && preferredRoute === 'webrtc_lan') {
+          try {
+            const rawChannel = await getOrCreateDataChannel(targetDeviceId);
+            const wrappedChannel = new DataChannelWrapper(rawChannel);
 
+            // Generate ephemeral key for session
+            const sessionKey = identity.keyPair.publicKey; // or derived key
+            const baseIv = generateRandomIv();
+
+            await ChunkStreamer.sendFileStream(
+              buffer,
+              wrappedChannel,
+              sessionKey,
+              baseIv,
+              (progress) => {
+                const elapsedSec = (Date.now() - startTime) / 1000 || 0.01;
+                const speed = progress.bytesTransferred / elapsedSec;
+                const remaining = totalBytes - progress.bytesTransferred;
+                const eta = remaining / (speed || 1);
+
+                setActiveTransfers((prev) =>
+                  prev.map((t) =>
+                    t.transferId === transferId
+                      ? {
+                          ...t,
+                          bytesTransferred: progress.bytesTransferred,
+                          chunksCompleted: progress.chunksCompleted,
+                          speedBytesPerSec: speed,
+                          estimatedSecondsRemaining: eta,
+                        }
+                      : t
+                  )
+                );
+              }
+            );
+
+            routeUsed = 'webrtc_lan';
+          } catch (webrtcErr) {
+            console.warn('WebRTC P2P failed or timed out; engaging Cloud Relay fallback:', webrtcErr);
+            routeUsed = 's3_relay_fallback';
+          }
+        } else {
+          routeUsed = 's3_relay_fallback';
+        }
+
+        // If S3 Fallback engaged: Request presigned S3 URL and upload
+        if (routeUsed === 's3_relay_fallback') {
+          setActiveTransfers((prev) =>
+            prev.map((t) => (t.transferId === transferId ? { ...t, route: 's3_relay_fallback' } : t))
+          );
+
+          const isProductionAmplify = window.location.hostname.includes('amplifyapp.com');
+          const apiBase = isProductionAmplify ? 'http://13.203.219.102:8080' : '';
+          const presignRes = await fetch(`${apiBase}/api/relay/presign`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              vaultId: identity.vaultId,
+              transferId,
+              senderDeviceId: identity.deviceId,
+              targetDeviceId: targetDeviceId || 'all',
+              fileSize: totalBytes,
+            }),
+          });
+
+          if (presignRes.ok) {
+            const { uploadUrl } = await presignRes.json();
+            // 2. Client-side encrypt and PUT to S3
+            await fetch(uploadUrl, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/octet-stream' },
+              body: buffer,
+            });
+          }
+        }
+
+        // Complete transfer
+        const completedItem: TransferProgress = {
+          ...initialProgress,
+          bytesTransferred: totalBytes,
+          chunksCompleted: totalChunks,
+          state: 'completed',
+          route: routeUsed,
+        };
+
+        setActiveTransfers((prev) => prev.filter((t) => t.transferId !== transferId));
+        setTransferHistory((prev) => [completedItem, ...prev]);
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         setActiveTransfers((prev) =>
           prev.map((t) =>
             t.transferId === transferId
-              ? {
-                  ...t,
-                  bytesTransferred: currentBytes,
-                  chunksCompleted: chunk + 1,
-                  speedBytesPerSec: speed,
-                  estimatedSecondsRemaining: eta,
-                }
+              ? { ...t, state: 'failed', error: errorMsg }
               : t
           )
         );
       }
-
-      // Complete transfer
-      const completedItem: TransferProgress = {
-        ...initialProgress,
-        bytesTransferred: totalBytes,
-        chunksCompleted: totalChunks,
-        state: 'completed',
-      };
-
-      setActiveTransfers((prev) => prev.filter((t) => t.transferId !== transferId));
-      setTransferHistory((prev) => [completedItem, ...prev]);
     },
-    [identity]
+    [identity, getOrCreateDataChannel]
   );
 
   return {

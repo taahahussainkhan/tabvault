@@ -2,13 +2,13 @@
   "name": "@tabvault/core",
   "version": "1.0.0",
   "description": "Shared cryptographic primitives, WebRTC protocols, and hybrid routing state machine for TabVault",
+  "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": "./dist/index.js"
     }
   },
   "scripts": {

@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   # -------------------------------------------------------------
-  # Job 1: Build & Verify Monorepo (Core, Server, Web)
+  # Job 1: Build & Typecheck Monorepo
   # -------------------------------------------------------------
   build-and-verify:
     name: ⚡ Build & Typecheck Monorepo
@@ -51,7 +51,7 @@ jobs:
   # Job 2: Deploy Frontend to AWS Amplify (Mumbai ap-south-1)
   # -------------------------------------------------------------
   deploy-frontend-amplify:
-    name: ☁️ Deploy Frontend to AWS Amplify
+    name: 🌐 Deploy Frontend to AWS Amplify
     needs: build-and-verify
     runs-on: ubuntu-latest
     steps:
@@ -65,12 +65,14 @@ jobs:
           path: packages/web/dist/
 
       - name: 🔐 Configure AWS Credentials
+        if: env.AWS_ACCESS_KEY_ID != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
-        continue-on-error: true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
 
       - name: 🚀 Zip and Deploy to AWS Amplify App
         run: |
@@ -85,11 +87,49 @@ jobs:
             aws amplify start-deployment --app-id d1rmonr4dy05xx --branch-name main --job-id $JOB_ID --region ap-south-1
             echo "🎉 Successfully deployed to AWS Amplify: https://main.d1rmonr4dy05xx.amplifyapp.com"
           else
-            echo "ℹ️ AWS credentials secret not configured in repo settings. Automated build via Amplify GitHub webhook active."
+            echo "ℹ️ AWS_ACCESS_KEY_ID secret not present. Skipping direct CLI deploy."
           fi
 
   # -------------------------------------------------------------
-  # Job 3: Build & Release Android APK (Fastlane)
+  # Job 3: Deploy Backend Container to AWS EC2 Instance
+  # -------------------------------------------------------------
+  deploy-backend-ec2:
+    name: ⚡ Deploy Backend to AWS EC2
+    needs: build-and-verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🚀 Deploy Backend to EC2 via SSH
+        if: env.EC2_SSH_KEY != ''
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        with:
+          host: ${{ secrets.EC2_HOST || '13.203.219.102' }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /opt/tabvault
+            sudo git fetch origin
+            sudo git reset --hard origin/main
+            sudo git clean -fd
+            sudo docker build -t tabvault-server -f packages/server/Dockerfile .
+            sudo docker stop tabvault-backend || true
+            sudo docker rm tabvault-backend || true
+            sudo docker run -d --name tabvault-backend --restart always -p 8080:8080 \
+              -e PORT=8080 \
+              -e HOST=0.0.0.0 \
+              -e AWS_REGION=ap-south-1 \
+              -e S3_BUCKET_NAME=tabvault-relay-drops-474665693065 \
+              -e MONGODB_URI="${{ secrets.MONGODB_URI || 'mongodb+srv://taaha128_db_user:fc3pX5oIv62WbWjq@cluster0.sm7xsk2.mongodb.net/tabvault?retryWrites=true&w=majority&appName=Cluster0' }}" \
+              tabvault-server
+            sudo docker ps
+            echo "✅ Live Backend successfully deployed on EC2!"
+
+  # -------------------------------------------------------------
+  # Job 4: Build & Release Android APK (Fastlane)
   # -------------------------------------------------------------
   build-and-release-apk:
     name: 📱 Build & Publish Android APK

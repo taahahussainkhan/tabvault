@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tabvault/core": "workspace:*",
+    "@tabvault/core": "*",
     "clsx": "^2.1.1",
     "nanoid": "^5.0.7",
     "qrcode": "^1.5.3",

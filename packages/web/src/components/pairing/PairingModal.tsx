@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import { LocalIdentity } from '../../services/crypto.service.js';
-import { Modal, Icon, Button } from '../common/index.js';
+import { Modal, Button } from '../common/index.js';
 
 interface PairingModalProps {
   isOpen: boolean;
