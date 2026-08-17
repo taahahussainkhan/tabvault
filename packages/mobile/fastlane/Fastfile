@@ -18,20 +18,20 @@ platform :android do
       print_command: true
     )
 
-    # 4. Copy generated APK using Fastlane's built-in lane context
-    output_dir = File.expand_path("../build", __FILE__)
+    # 4. Copy generated APK to packages/mobile/build/tabvault-release.apk
+    mobile_root = File.expand_path("..", File.dirname(__FILE__))
+    output_dir = File.join(mobile_root, "build")
     FileUtils.mkdir_p(output_dir)
 
     apk_path = lane_context[SharedValues::GRADLE_APK_OUTPUT_PATH] ||
-               Dir.glob(File.expand_path("../android/app/build/outputs/apk/**/*.apk", __FILE__)).first ||
-               Dir.glob("android/app/build/outputs/apk/**/*.apk").first
+               Dir.glob(File.join(mobile_root, "android/app/build/outputs/apk/**/*.apk")).first
 
     if apk_path && File.exist?(apk_path)
       target_apk = File.join(output_dir, "tabvault-release.apk")
       FileUtils.cp(apk_path, target_apk)
-      UI.success("🎉 Successfully built TabVault Release APK: #{target_apk}")
+      UI.success("🎉 Successfully copied Release APK to: #{target_apk}")
     else
-      UI.user_error!("Could not find generated APK. Path: #{apk_path}")
+      UI.user_error!("Could not find generated APK. Checked: #{apk_path}")
     end
   end
 end

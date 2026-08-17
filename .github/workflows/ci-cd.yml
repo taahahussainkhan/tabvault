@@ -214,6 +214,18 @@ jobs:
           bundle install
           bundle exec fastlane android build_apk
 
+      - name: 📦 Prepare Release Artifacts
+        run: |
+          mkdir -p packages/mobile/build
+          APK_FILE=$(find packages/mobile/android/app/build/outputs/apk -name "*.apk" 2>/dev/null | head -n 1)
+          if [ -n "$APK_FILE" ]; then
+            cp "$APK_FILE" packages/mobile/build/tabvault-release.apk
+            echo "✅ Successfully prepared release APK: $(ls -lh packages/mobile/build/tabvault-release.apk)"
+          else
+            echo "⚠️ Finding APK via glob..."
+            find packages/mobile -name "*.apk"
+          fi
+
       - name: 📤 Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
