@@ -165,7 +165,7 @@ export async function handler(event: any): Promise<APIGatewayProxyResult> {
       { upsert: true }
     );
 
-    console.log(`🔌 [Lambda WS Connect] Device "${deviceName}" (${deviceId}) registered in vault "${vaultId}"`);
+    console.log(`🔌 [Lambda WS Connect] Device "${deviceName}" (${deviceId}) connected to vault "${vaultId}"`);
     return { statusCode: 200, body: 'Connected.' };
   }
 
@@ -181,11 +181,20 @@ export async function handler(event: any): Promise<APIGatewayProxyResult> {
         connectionId: { $ne: connectionId },
       });
 
+      const updatedDevices = peers.map((p) => ({
+        deviceId: p.deviceId,
+        deviceName: p.deviceName,
+        platform: p.platform,
+        publicKeyBase64: p.publicKeyBase64,
+        status: 'online_local',
+        lastSeen: Date.now(),
+      }));
+
       await Promise.allSettled(
         peers.map((p) =>
           postMessage(apigw, p.connectionId, {
-            type: 'device_left',
-            deviceId: existing.deviceId,
+            type: 'presence:state',
+            payload: { devices: updatedDevices },
             timestamp: Date.now(),
           })
         )
@@ -200,16 +209,42 @@ export async function handler(event: any): Promise<APIGatewayProxyResult> {
       return { statusCode: 400, body: 'Invalid payload' };
     }
 
-    const sender = await ConnectionModel.findOne({ connectionId });
-    if (!sender) return { statusCode: 403, body: 'Unauthenticated' };
-
-    const message = JSON.parse(event.body);
+    let sender = await ConnectionModel.findOne({ connectionId });
+    const message = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
     const apigw = getApiGwClient(domainName, stage);
 
-    // Presence Query
-    if (message.action === 'get_presence' || message.type === 'get_presence') {
-      const peers = await ConnectionModel.find({ vaultId: sender.vaultId });
-      const devices = peers.map((p) => ({
+    // Heartbeat Ping
+    if (message.type === 'ping') {
+      await postMessage(apigw, connectionId, { type: 'pong', timestamp: Date.now() });
+      return { statusCode: 200, body: 'PONG' };
+    }
+
+    // Presence Join / Registration
+    if (message.type === 'presence:join' || message.type === 'get_presence' || message.action === 'get_presence') {
+      const vaultId = message.vaultId || sender?.vaultId || 'vault_default';
+      const deviceId = message.senderDeviceId || message.payload?.deviceId || sender?.deviceId || `dev_${connectionId.slice(0, 8)}`;
+      const deviceName = message.payload?.deviceName || sender?.deviceName || 'Connected Device';
+      const platform = message.payload?.platform || sender?.platform || 'web';
+      const publicKeyBase64 = message.payload?.publicKeyBase64 || sender?.publicKeyBase64 || '';
+
+      sender = await ConnectionModel.findOneAndUpdate(
+        { connectionId },
+        {
+          connectionId,
+          vaultId,
+          deviceId,
+          deviceName,
+          platform,
+          publicKeyBase64,
+          connectedAt: new Date(),
+          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+        },
+        { upsert: true, new: true }
+      );
+
+      // Query all peers currently in this vault
+      const allPeers = await ConnectionModel.find({ vaultId });
+      const devices = allPeers.map((p) => ({
         deviceId: p.deviceId,
         deviceName: p.deviceName,
         platform: p.platform,
@@ -218,12 +253,30 @@ export async function handler(event: any): Promise<APIGatewayProxyResult> {
         lastSeen: Date.now(),
       }));
 
+      // 1. Send full presence list back to the sender
       await postMessage(apigw, connectionId, {
-        type: 'presence_update',
-        devices,
+        type: 'presence:state',
+        payload: { devices },
+        timestamp: Date.now(),
       });
 
-      return { statusCode: 200, body: 'Presence sent.' };
+      // 2. Broadcast updated presence state to all other peers in the vault
+      const otherPeers = allPeers.filter((p) => p.connectionId !== connectionId);
+      await Promise.allSettled(
+        otherPeers.map((p) =>
+          postMessage(apigw, p.connectionId, {
+            type: 'presence:state',
+            payload: { devices },
+            timestamp: Date.now(),
+          })
+        )
+      );
+
+      return { statusCode: 200, body: 'Presence synchronized.' };
+    }
+
+    if (!sender) {
+      return { statusCode: 403, body: 'Unauthenticated' };
     }
 
     // Direct Peer Message (WebRTC Offer/Answer/ICE)

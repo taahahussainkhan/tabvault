@@ -1,10 +1,10 @@
-import { SignalingMessage, DeviceInfo } from '@tabvault/core';
+import { DeviceInfo, SignalingMessage } from '@tabvault/core';
 
-export type MessageListener = (msg: SignalingMessage) => void;
-export type PresenceListener = (devices: DeviceInfo[]) => void;
-export type StatusListener = (connected: boolean) => void;
+export type MobileMessageListener = (msg: SignalingMessage) => void;
+export type MobilePresenceListener = (devices: DeviceInfo[]) => void;
+export type MobileStatusListener = (connected: boolean) => void;
 
-export class SignalingClient {
+export class MobileSignalingClient {
   private ws?: WebSocket;
   private url: string;
   private vaultId: string;
@@ -13,9 +13,9 @@ export class SignalingClient {
   private reconnectTimeout?: any;
   private pingInterval?: any;
 
-  private messageListeners: Set<MessageListener> = new Set();
-  private presenceListeners: Set<PresenceListener> = new Set();
-  private statusListeners: Set<StatusListener> = new Set();
+  private messageListeners: Set<MobileMessageListener> = new Set();
+  private presenceListeners: Set<MobilePresenceListener> = new Set();
+  private statusListeners: Set<MobileStatusListener> = new Set();
 
   constructor(url: string, vaultId: string, localDevice: DeviceInfo) {
     this.url = url;
@@ -39,14 +39,13 @@ export class SignalingClient {
     try {
       const query = `?vaultId=${encodeURIComponent(this.vaultId)}&deviceId=${encodeURIComponent(
         this.localDevice.deviceId
-      )}&deviceName=${encodeURIComponent(this.localDevice.deviceName)}&platform=${encodeURIComponent(
-        this.localDevice.platform
-      )}&publicKey=${encodeURIComponent(this.localDevice.publicKeyBase64)}`;
+      )}&deviceName=${encodeURIComponent(this.localDevice.deviceName)}&platform=android`;
       const fullUrl = this.url.includes('?') ? `${this.url}&${query.slice(1)}` : `${this.url}${query}`;
 
       this.ws = new WebSocket(fullUrl);
 
       this.ws.onopen = () => {
+        console.log('⚡ [Mobile WS] Connected to Signaling Server');
         this.notifyStatus(true);
         this.sendPresenceJoin();
         this.startHeartbeat();
@@ -54,13 +53,13 @@ export class SignalingClient {
 
       this.ws.onmessage = (event) => {
         try {
-          const msg = JSON.parse(event.data) as SignalingMessage;
-          if (msg.type === 'presence:state' || (msg as any).type === 'presence_update') {
+          const msg = JSON.parse(event.data as string) as SignalingMessage;
+          if (msg.type === 'presence:state' || msg.type === 'presence_update') {
             const payload = msg.payload as { devices?: DeviceInfo[] } | undefined;
             const devices = payload?.devices || (msg as any).devices || [];
             this.notifyPresence(devices);
           } else if (msg.type === 'pong') {
-            // Heartbeat ACK
+            // Heartbeat
           } else {
             this.notifyMessage(msg);
           }
@@ -78,10 +77,10 @@ export class SignalingClient {
       };
 
       this.ws.onerror = (err) => {
-        console.warn('WebSocket signaling client error:', err);
+        console.warn('Mobile WebSocket error:', err);
       };
     } catch (err) {
-      console.warn('Could not establish WebSocket connection:', err);
+      console.warn('Could not establish Mobile WebSocket:', err);
       this.scheduleReconnect();
     }
   }
@@ -132,17 +131,17 @@ export class SignalingClient {
     }, 3000);
   }
 
-  public onMessage(listener: MessageListener): () => void {
+  public onMessage(listener: MobileMessageListener): () => void {
     this.messageListeners.add(listener);
     return () => this.messageListeners.delete(listener);
   }
 
-  public onPresence(listener: PresenceListener): () => void {
+  public onPresence(listener: MobilePresenceListener): () => void {
     this.presenceListeners.add(listener);
     return () => this.presenceListeners.delete(listener);
   }
 
-  public onStatus(listener: StatusListener): () => void {
+  public onStatus(listener: MobileStatusListener): () => void {
     this.statusListeners.add(listener);
     return () => this.statusListeners.delete(listener);
   }
